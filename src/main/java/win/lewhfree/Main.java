@@ -7,6 +7,8 @@ import io.javalin.Javalin;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+
 import io.javalin.json.JavalinJackson;
 import org.postgresql.util.PGobject;
 
@@ -26,7 +28,7 @@ public class Main {
             case "all":
                 try {
                     Connection connection = frontend();
-                    geojsonimporter(geojson_sample, connection);
+                    //geojsonimporter(geojson_sample, connection);
                 } catch(Exception e) {
                     e.printStackTrace();
                     System.exit(1);
@@ -55,7 +57,7 @@ public class Main {
             config.jsonMapper(new JavalinJackson());
             config.routes.get("/ident", ctx -> {
                 String make = ctx.queryParam("brand");
-                List<Map<String, Object>> carreq = request(connection, make);
+                List<Map<String, Object>> carreq = request(connection, ctx);
                 ctx.json(carreq);
                 ctx.status(201);
                 System.out.println("Ident pinged");
@@ -64,22 +66,35 @@ public class Main {
         return connection;
     }
 
-    static List<Map<String, Object>> request(Connection connection, String brand) throws Exception{
-        Statement st = connection.createStatement();
-        PreparedStatement ps = connection.prepareStatement("SELECT * FROM cars WHERE brand = ?");
-        ps.setString(1, brand);
+    static List<Map<String, Object>> request(Connection connection, io.javalin.http.Context ctx) throws Exception {
+
+        Float lat1 = Float.parseFloat(Objects.requireNonNull(ctx.queryParam("lat1")));
+        Float lon1 = Float.parseFloat(Objects.requireNonNull(ctx.queryParam("lon1")));
+        Float lat2 = Float.parseFloat(Objects.requireNonNull(ctx.queryParam("lat2")));
+        Float lon2 = Float.parseFloat(Objects.requireNonNull(ctx.queryParam("lon2")));
+
+        String sql = """
+                SELECT ST_AsGeoJSON(geometry) AS geojson FROM data WHERE ST_Intersects(ST_MakeEnvelope(?, ?, ?, ?, 4326), geometry) = TRUE;
+                """;
+        PreparedStatement ps = connection.prepareStatement(sql);
+        ps.setFloat(1, lon1);
+        ps.setFloat(2, lat1);
+        ps.setFloat(3, lon2);
+        ps.setFloat(4, lat2);
+
         ResultSet rs = ps.executeQuery();
+        // 2. For each, pack a geojson using geometry and then all (non-null) the other fields as properties
+        // 3. pack all the returned json into one array and send to client.
+
         List<Map<String, Object>> values = new ArrayList<Map<String, Object>>();
 
         while(rs.next()) {
-            String branddb = rs.getString("brand");
-            String model = rs.getString("model");
-            Integer year = rs.getInt("year");
-            values.add(Map.of("brand", branddb, "model", model, "year", year));
+                System.out.println("Got a return val!");
+                String geojson_ret = rs.getString("geojson");
+                values.add(Map.of("geojson", geojson_ret));
         }
 
         rs.close();
-        st.close();
         return values;
     }
 
